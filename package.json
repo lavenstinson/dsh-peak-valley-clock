@@ -1,7 +1,7 @@
 {
-  "name": "dsh-peak-valley-clock",
+  "name": "dsh-peak-valley-usage",
   "version": "1.0.0",
-  "description": "DeepSeek Harness UI plugin: a centered white 24-hour clock above the conversation, with an avatar that switches between DeepSeek API peak and off-peak billing periods.",
+  "description": "DeepSeek Harness UI plugin: a peak/off-peak avatar plus today's token usage and account balance in the conversation header.",
   "license": "MIT",
   "type": "module",
   "exports": {
