@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "DeepSeek Peak-Valley Clock",
-    "description": "Centered white 24-hour clock above the conversation; the avatar follows the DeepSeek API peak/off-peak billing hours."
+    "title": "DeepSeek Peak-Valley Usage",
+    "description": "Peak/off-peak avatar plus today's token usage and account balance, in two lines at the far left of the header."
   }
 }
