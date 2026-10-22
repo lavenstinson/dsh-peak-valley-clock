@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "DeepSeek峰谷时钟",
-    "description": "在对话区域上方居中显示白色的 24 小时数字时钟，头像按 DeepSeek API 峰谷计价时段自动切换（峰时大肥鱼、谷时梁圣）。"
+    "title": "DeepSeek峰谷用量",
+    "description": "标题栏最左侧显示随峰谷时段切换的头像（峰时大肥鱼、谷时梁圣），旁边分两行显示今日 Token 用量与账户余额。"
   }
 }
