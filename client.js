@@ -1,5 +1,5 @@
 window.__ModuleLoader__.load({
-  id: 'dsh-peak-valley-clock',
+  id: 'dsh-peak-valley-usage',
   factory(require) {
     const React = require('react');
     const h = React.createElement;
@@ -8,7 +8,6 @@ window.__ModuleLoader__.load({
     // DeepSeek API 峰谷计价时段（官方定价规则，北京时间）
     // 峰时：周一至周五（不含中国法定节假日）09:00–12:00、14:00–18:00 → 大肥鱼
     // 谷时：其余所有时间（含周末、节假日全天）→ 梁圣
-    // HOLIDAYS 里放「工作日放假」的日期（YYYY-MM-DD）即可，周末本来就全谷。
     // ---------------------------------------------------------------------
     const PEAK_WINDOWS = [
       { start: 9 * 60, end: 12 * 60 },
@@ -19,6 +18,7 @@ window.__ModuleLoader__.load({
       peak: { label: '峰', name: '大肥鱼', img: '/pvc-assets/dafeiyu.png', range: '工作日 09:00–12:00 / 14:00–18:00' },
       valley: { label: '谷', name: '梁圣', img: '/pvc-assets/liangsheng.png', range: '其余时间及周末、节假日全天' },
     };
+    const AVATAR_SIZE = 36; // 45px × 0.8
 
     const pad = (n) => String(n).padStart(2, '0');
 
@@ -62,24 +62,43 @@ window.__ModuleLoader__.load({
       });
     }
 
+    // --- 数字格式化 ---
+    function formatTokens(n) {
+      if (typeof n !== 'number' || !isFinite(n)) return '--';
+      if (n >= 1e8) return `${(n / 1e8).toFixed(2)}亿`;
+      if (n >= 1e4) return `${(n / 1e4).toFixed(1)}万`;
+      return n.toLocaleString('zh-CN');
+    }
+
+    function formatBalance(balance) {
+      if (balance === null || balance === undefined) return '--';
+      if (balance.status === 'ok') {
+        const wallets = balance.wallets || [];
+        if (wallets.length === 0) return '¥0.00';
+        return wallets.map((w) => {
+          const n = Number(w.balance);
+          const text = isFinite(n) ? n.toFixed(2) : String(w.balance);
+          return `${w.currency === 'USD' ? '$' : '¥'}${text}`;
+        }).join(' / ');
+      }
+      if (balance.status === 'signed-out') return '未登录';
+      return '获取失败';
+    }
+
     const CSS = `
 .pvc-strip {
-  position: absolute;
-  left: 50%;
-  top: 0;
-  transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 12px;
+  gap: 8px;
+  height: 100%;
+  padding: 0 8px;
   white-space: nowrap;
-  pointer-events: auto;
 }
 .pvc-avatar {
   display: block;
   flex: none;
-  width: 30px;
-  height: 30px;
+  width: ${AVATAR_SIZE}px;
+  height: ${AVATAR_SIZE}px;
   border-radius: 50%;
   object-fit: cover;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4), 0 1px 4px rgba(0, 0, 0, 0.35);
@@ -90,65 +109,77 @@ window.__ModuleLoader__.load({
   border-radius: 50%;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4), 0 1px 4px rgba(0, 0, 0, 0.35);
 }
-.pvc-time {
+.pvc-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  line-height: 1.15;
+}
+.pvc-line {
   color: #ffffff;
-  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  font-size: 31px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0.04em;
-  font-variant-numeric: tabular-nums;
+  font-size: 12.8px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
 }
-.pvc-badge {
-  flex: none;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-  padding: 4px 8px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-}
-.pvc-peak {
-  color: var(--dsw-alias-state-warn-primary);
-  border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 55%, transparent);
-  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 16%, transparent);
-}
-.pvc-valley {
-  color: var(--dsw-alias-state-success-primary);
-  border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary) 55%, transparent);
-  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 16%, transparent);
+.pvc-label {
+  color: rgba(255, 255, 255, 0.62);
+  font-weight: 500;
+  margin-right: 4px;
 }
 `;
 
-    function ClockStrip() {
+    function UsageStrip() {
       const [now, setNow] = React.useState(() => new Date());
+      const [status, setStatus] = React.useState(null);
 
+      // 每 30 秒刷新一次峰谷判定（跨时段边界及时切换头像）
       React.useEffect(() => {
-        let timer;
-        const tick = () => {
-          setNow(new Date());
-          timer = setTimeout(tick, 1000 - (Date.now() % 1000) + 5);
+        const timer = setInterval(() => setNow(new Date()), 30_000);
+        return () => clearInterval(timer);
+      }, []);
+
+      // 用量与余额：首屏立即拉取，之后每 60 秒刷新（Host 端有 60 秒缓存）
+      React.useEffect(() => {
+        let alive = true;
+        const load = async () => {
+          try {
+            const res = await fetch('/pvc-usage', { cache: 'no-store' });
+            const json = await res.json();
+            if (alive) setStatus(json);
+          } catch {
+            if (alive) setStatus((prev) => prev ?? { tokens: null, balance: null });
+          }
         };
-        timer = setTimeout(tick, 1000 - (Date.now() % 1000) + 5);
-        return () => clearTimeout(timer);
+        load();
+        const timer = setInterval(load, 60_000);
+        return () => {
+          alive = false;
+          clearInterval(timer);
+        };
       }, []);
 
       const period = periodFor(now);
       const info = PERIODS[period];
-      const isPeak = period === 'peak';
-      const timeText = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+      const tokenText = status === null ? '--' : formatTokens(status.tokens ? status.tokens.total : null);
+      const balanceText = status === null ? '--' : formatBalance(status.balance);
 
       return h('div', {
         className: 'pvc-strip',
-        role: 'status',
-        'aria-label': `${timeText}，${info.name}，${info.label}时段`,
-        title: `${info.name} · ${info.label}时段（${info.range}）`,
       },
         h('style', null, CSS),
-        h(Avatar, { src: info.img, kind: period, size: 30 }),
-        h('span', { className: 'pvc-time' }, timeText),
-        h('span', { className: isPeak ? 'pvc-badge pvc-peak' : 'pvc-badge pvc-valley' }, info.label),
+        h(Avatar, { src: info.img, kind: period, size: AVATAR_SIZE }),
+        h('div', { className: 'pvc-info' },
+          h('span', { className: 'pvc-line' },
+            h('span', { className: 'pvc-label' }, '今日 Token'),
+            tokenText,
+          ),
+          h('span', { className: 'pvc-line' },
+            h('span', { className: 'pvc-label' }, '余额'),
+            balanceText,
+          ),
+        ),
       );
     }
 
@@ -157,7 +188,7 @@ window.__ModuleLoader__.load({
       apply(ctx) {
         ctx.slots.inject('conversation.header.leading', () => ctx.slots.register({
           name: 'conversation.header.leading',
-        }, ClockStrip));
+        }, UsageStrip));
       },
     };
   },
